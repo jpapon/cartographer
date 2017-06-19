@@ -22,6 +22,7 @@
 #include "cartographer/io/fixed_ratio_sampling_points_processor.h"
 #include "cartographer/io/intensity_to_color_points_processor.h"
 #include "cartographer/io/min_max_range_filtering_points_processor.h"
+#include "cartographer/io/min_max_dim_filtering_points_processor.h"
 #include "cartographer/io/null_points_processor.h"
 #include "cartographer/io/outlier_removing_points_processor.h"
 #include "cartographer/io/pcd_writing_points_processor.h"
@@ -29,6 +30,7 @@
 #include "cartographer/io/xray_points_processor.h"
 #include "cartographer/io/xyz_writing_points_processor.h"
 #include "cartographer/mapping/proto/trajectory.pb.h"
+#include "cartographer/io/xray_points_processor_mod.h"
 
 namespace cartographer {
 namespace io {
@@ -65,6 +67,7 @@ void RegisterBuiltInPointsProcessors(
   RegisterPlainPointsProcessor<CountingPointsProcessor>(builder);
   RegisterPlainPointsProcessor<FixedRatioSamplingPointsProcessor>(builder);
   RegisterPlainPointsProcessor<MinMaxRangeFiteringPointsProcessor>(builder);
+  RegisterPlainPointsProcessor<MinMaxDimFilteringPointsProcessor>(builder);
   RegisterPlainPointsProcessor<OutlierRemovingPointsProcessor>(builder);
   RegisterPlainPointsProcessor<ColoringPointsProcessor>(builder);
   RegisterPlainPointsProcessor<IntensityToColorPointsProcessor>(builder);
@@ -83,6 +86,17 @@ void RegisterBuiltInPointsProcessors(
           common::LuaParameterDictionary* const dictionary,
           PointsProcessor* const next) -> std::unique_ptr<PointsProcessor> {
         return XRayPointsProcessor::FromDictionary(
+            trajectory, file_writer_factory, dictionary, next);
+      });
+
+    // X-Ray is an odd ball since it requires the trajectory to figure out the
+  // different building levels we walked on to separate the images.
+  builder->Register(
+      XRayPointsProcessorMod::kConfigurationFileActionName,
+      [&trajectory, file_writer_factory](
+          common::LuaParameterDictionary* const dictionary,
+          PointsProcessor* const next) -> std::unique_ptr<PointsProcessor> {
+        return XRayPointsProcessorMod::FromDictionary(
             trajectory, file_writer_factory, dictionary, next);
       });
 }
