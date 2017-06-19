@@ -36,13 +36,12 @@ namespace {
 void WriteDebugImage(const string& filename,
                      const ProbabilityGrid& probability_grid) {
   constexpr int kUnknown = 128;
-  const mapping_2d::CellLimits& cell_limits =
-      probability_grid.limits().cell_limits();
+  const CellLimits& cell_limits = probability_grid.limits().cell_limits();
   const int width = cell_limits.num_x_cells;
   const int height = cell_limits.num_y_cells;
   std::vector<uint8_t> rgb;
-  for (const Eigen::Array2i& xy_index : mapping_2d::XYIndexRangeIterator(
-           probability_grid.limits().cell_limits())) {
+  for (const Eigen::Array2i& xy_index :
+       XYIndexRangeIterator(probability_grid.limits().cell_limits())) {
     CHECK(probability_grid.limits().Contains(xy_index));
     const uint8_t value =
         probability_grid.IsKnown(xy_index)
@@ -104,7 +103,53 @@ proto::SubmapsOptions CreateSubmapsOptions(
 Submap::Submap(const MapLimits& limits, const Eigen::Vector2f& origin)
     : mapping::Submap(transform::Rigid3d::Translation(
           Eigen::Vector3d(origin.x(), origin.y(), 0.))),
-      probability_grid(limits) {}
+      probability_grid_(limits) {}
+
+void Submap::ToResponseProto(
+    const transform::Rigid3d&,
+    mapping::proto::SubmapQuery::Response* const response) const {
+  response->set_submap_version(num_range_data());
+
+  Eigen::Array2i offset;
+  CellLimits limits;
+  probability_grid_.ComputeCroppedLimits(&offset, &limits);
+
+  string cells;
+  for (const Eigen::Array2i& xy_index : XYIndexRangeIterator(limits)) {
+    if (probability_grid_.IsKnown(xy_index + offset)) {
+      // We would like to add 'delta' but this is not possible using a value and
+      // alpha. We use premultiplied alpha, so when 'delta' is positive we can
+      // add it by setting 'alpha' to zero. If it is negative, we set 'value' to
+      // zero, and use 'alpha' to subtract. This is only correct when the pixel
+      // is currently white, so walls will look too gray. This should be hard to
+      // detect visually for the user, though.
+      const int delta =
+          128 - mapping::ProbabilityToLogOddsInteger(
+                    probability_grid_.GetProbability(xy_index + offset));
+      const uint8 alpha = delta > 0 ? 0 : -delta;
+      const uint8 value = delta > 0 ? delta : 0;
+      cells.push_back(value);
+      cells.push_back((value || alpha) ? alpha : 1);
+    } else {
+      constexpr uint8 kUnknownLogOdds = 0;
+      cells.push_back(static_cast<uint8>(kUnknownLogOdds));  // value
+      cells.push_back(0);                                    // alpha
+    }
+  }
+  common::FastGzipString(cells, response->mutable_cells());
+
+  response->set_width(limits.num_x_cells);
+  response->set_height(limits.num_y_cells);
+  const double resolution = probability_grid_.limits().resolution();
+  response->set_resolution(resolution);
+  const double max_x =
+      probability_grid_.limits().max().x() - resolution * offset.y();
+  const double max_y =
+      probability_grid_.limits().max().y() - resolution * offset.x();
+  *response->mutable_slice_pose() = transform::ToProto(
+      local_pose().inverse() *
+      transform::Rigid3d::Translation(Eigen::Vector3d(max_x, max_y, 0.)));
+}
 
 Submaps::Submaps(const proto::SubmapsOptions& options)
     : options_(options),
@@ -117,43 +162,49 @@ Submaps::Submaps(const proto::SubmapsOptions& options)
 void Submaps::InsertRangeData(const sensor::RangeData& range_data) {
   for (const int index : insertion_indices()) {
     Submap* submap = submaps_[index].get();
-    CHECK(submap->finished_probability_grid == nullptr);
-    range_data_inserter_.Insert(range_data, &submap->probability_grid);
-    ++submap->num_range_data;
+    CHECK(!submap->finished_);
+    range_data_inserter_.Insert(range_data, &submap->probability_grid_);
+    ++submap->num_range_data_;
   }
-  const Submap* const last_submap = Get(size() - 1);
-  if (last_submap->num_range_data == options_.num_range_data()) {
+  if (submaps_.back()->num_range_data_ == options_.num_range_data()) {
     AddSubmap(range_data.origin.head<2>());
   }
 }
 
-const Submap* Submaps::Get(int index) const {
+std::shared_ptr<const Submap> Submaps::Get(int index) const {
   CHECK_GE(index, 0);
   CHECK_LT(index, size());
-  return submaps_[index].get();
+  return submaps_[index];
 }
 
 int Submaps::size() const { return submaps_.size(); }
 
-void Submaps::SubmapToProto(
-    const int index, const transform::Rigid3d&,
-    mapping::proto::SubmapQuery::Response* const response) const {
-  AddProbabilityGridToResponse(Get(index)->local_pose,
-                               Get(index)->probability_grid, response);
+int Submaps::matching_index() const {
+  if (size() > 1) {
+    return size() - 2;
+  }
+  return size() - 1;
+}
+
+std::vector<int> Submaps::insertion_indices() const {
+  if (size() > 1) {
+    return {size() - 2, size() - 1};
+  }
+  return {size() - 1};
 }
 
 void Submaps::FinishSubmap(int index) {
   // Crop the finished Submap before inserting a new Submap to reduce peak
   // memory usage a bit.
   Submap* submap = submaps_[index].get();
-  CHECK(submap->finished_probability_grid == nullptr);
-  submap->probability_grid =
-      ComputeCroppedProbabilityGrid(submap->probability_grid);
-  submap->finished_probability_grid = &submap->probability_grid;
+  CHECK(!submap->finished_);
+  submap->probability_grid_ =
+      ComputeCroppedProbabilityGrid(submap->probability_grid_);
+  submap->finished_ = true;
   if (options_.output_debug_images()) {
     // Output the Submap that won't be changed from now on.
     WriteDebugImage("submap" + std::to_string(index) + ".webp",
-                    submap->probability_grid);
+                    submap->probability_grid_);
   }
 }
 

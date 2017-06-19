@@ -149,9 +149,7 @@ class SparsePoseGraphTest : public ::testing::Test {
     const sensor::PointCloud new_point_cloud = sensor::TransformPointCloud(
         point_cloud_,
         transform::Embed3D(current_pose_.inverse().cast<float>()));
-    const mapping::Submap* const matching_submap =
-        submaps_->Get(submaps_->matching_index());
-    std::vector<const mapping::Submap*> insertion_submaps;
+    std::vector<std::shared_ptr<const Submap>> insertion_submaps;
     for (int insertion_index : submaps_->insertion_indices()) {
       insertion_submaps.push_back(submaps_->Get(insertion_index));
     }
@@ -161,9 +159,10 @@ class SparsePoseGraphTest : public ::testing::Test {
     constexpr int kTrajectoryId = 0;
     submaps_->InsertRangeData(TransformRangeData(
         range_data, transform::Embed3D(pose_estimate.cast<float>())));
+
     sparse_pose_graph_->AddScan(
         common::FromUniversal(0), transform::Rigid3d::Identity(), range_data,
-        pose_estimate, kTrajectoryId, matching_submap, insertion_submaps);
+        pose_estimate, kTrajectoryId, std::move(insertion_submaps));
   }
 
   void MoveRelative(const transform::Rigid2d& movement) {

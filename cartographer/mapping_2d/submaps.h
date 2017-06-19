@@ -41,25 +41,54 @@ ProbabilityGrid ComputeCroppedProbabilityGrid(
 proto::SubmapsOptions CreateSubmapsOptions(
     common::LuaParameterDictionary* parameter_dictionary);
 
-struct Submap : public mapping::Submap {
+class Submap : public mapping::Submap {
+ public:
   Submap(const MapLimits& limits, const Eigen::Vector2f& origin);
 
-  ProbabilityGrid probability_grid;
+  const ProbabilityGrid& probability_grid() const { return probability_grid_; }
+  const bool finished() const { return finished_; }
+
+  void ToResponseProto(
+      const transform::Rigid3d& global_submap_pose,
+      mapping::proto::SubmapQuery::Response* response) const override;
+
+ private:
+  // TODO(hrapp): Remove friend declaration.
+  friend class Submaps;
+
+  ProbabilityGrid probability_grid_;
+  bool finished_ = false;
 };
 
-// A container of Submaps.
-class Submaps : public mapping::Submaps {
+// Submaps is a sequence of maps to which scans are matched and into which scans
+// are inserted.
+//
+// Except during initialization when only a single submap exists, there are
+// always two submaps into which scans are inserted: an old submap that is used
+// for matching, and a new one, which will be used for matching next, that is
+// being initialized.
+//
+// Once a certain number of scans have been inserted, the new submap is
+// considered initialized: the old submap is no longer changed, the "new" submap
+// is now the "old" submap and is used for scan-to-map matching. Moreover,
+// a "new" submap gets inserted.
+class Submaps {
  public:
   explicit Submaps(const proto::SubmapsOptions& options);
 
   Submaps(const Submaps&) = delete;
   Submaps& operator=(const Submaps&) = delete;
 
-  const Submap* Get(int index) const override;
-  int size() const override;
-  void SubmapToProto(
-      int index, const transform::Rigid3d& global_submap_pose,
-      mapping::proto::SubmapQuery::Response* response) const override;
+  std::shared_ptr<const Submap> Get(int index) const;
+  int size() const;
+
+  // Returns the index of the newest initialized Submap which can be
+  // used for scan-to-map matching.
+  int matching_index() const;
+
+  // Returns the indices of the Submap into which point clouds will
+  // be inserted.
+  std::vector<int> insertion_indices() const;
 
   // Inserts 'range_data' into the Submap collection.
   void InsertRangeData(const sensor::RangeData& range_data);
@@ -69,8 +98,7 @@ class Submaps : public mapping::Submaps {
   void AddSubmap(const Eigen::Vector2f& origin);
 
   const proto::SubmapsOptions options_;
-
-  std::vector<std::unique_ptr<Submap>> submaps_;
+  std::vector<std::shared_ptr<Submap>> submaps_;
   RangeDataInserter range_data_inserter_;
 };
 

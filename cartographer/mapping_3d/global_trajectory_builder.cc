@@ -30,8 +30,15 @@ GlobalTrajectoryBuilder::GlobalTrajectoryBuilder(
 
 GlobalTrajectoryBuilder::~GlobalTrajectoryBuilder() {}
 
-const mapping_3d::Submaps* GlobalTrajectoryBuilder::submaps() const {
-  return local_trajectory_builder_->submaps();
+int GlobalTrajectoryBuilder::num_submaps() {
+  return sparse_pose_graph_->num_submaps(trajectory_id_);
+}
+
+GlobalTrajectoryBuilder::SubmapData GlobalTrajectoryBuilder::GetSubmapData(
+    const int submap_index) {
+  return {local_trajectory_builder_->submaps()->Get(submap_index),
+          sparse_pose_graph_->GetSubmapTransform(
+              mapping::SubmapId{trajectory_id_, submap_index})};
 }
 
 void GlobalTrajectoryBuilder::AddImuData(
@@ -48,15 +55,13 @@ void GlobalTrajectoryBuilder::AddRangefinderData(
     const sensor::PointCloud& ranges) {
   auto insertion_result =
       local_trajectory_builder_->AddRangefinderData(time, origin, ranges);
-
   if (insertion_result == nullptr) {
     return;
   }
-
   sparse_pose_graph_->AddScan(
       insertion_result->time, insertion_result->range_data_in_tracking,
       insertion_result->pose_observation, trajectory_id_,
-      insertion_result->matching_submap, insertion_result->insertion_submaps);
+      std::move(insertion_result->insertion_submaps));
 }
 
 void GlobalTrajectoryBuilder::AddOdometerData(const common::Time time,

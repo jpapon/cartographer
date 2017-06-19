@@ -41,8 +41,7 @@ class LocalTrajectoryBuilder {
  public:
   struct InsertionResult {
     common::Time time;
-    const mapping::Submap* matching_submap;
-    std::vector<const mapping::Submap*> insertion_submaps;
+    std::vector<std::shared_ptr<const Submap>> insertion_submaps;
     transform::Rigid3d tracking_to_tracking_2d;
     sensor::RangeData range_data_in_tracking_2d;
     transform::Rigid2d pose_estimate_2d;
@@ -63,7 +62,7 @@ class LocalTrajectoryBuilder {
                   const Eigen::Vector3d& angular_velocity);
   void AddOdometerData(common::Time time, const transform::Rigid3d& pose);
 
-  const Submaps* submaps() const;
+  Submaps* submaps();
 
  private:
   sensor::RangeData TransformAndFilterRangeData(
