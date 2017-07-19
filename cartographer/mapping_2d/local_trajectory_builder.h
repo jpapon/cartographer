@@ -28,7 +28,6 @@
 #include "cartographer/mapping_2d/scan_matching/real_time_correlative_scan_matcher.h"
 #include "cartographer/mapping_2d/submaps.h"
 #include "cartographer/mapping_3d/motion_filter.h"
-#include "cartographer/sensor/configuration.h"
 #include "cartographer/sensor/voxel_filter.h"
 #include "cartographer/transform/rigid_transform.h"
 
@@ -39,6 +38,8 @@ namespace mapping_2d {
 // closure.
 class LocalTrajectoryBuilder {
  public:
+  using PoseEstimate = mapping::GlobalTrajectoryBuilderInterface::PoseEstimate;
+
   struct InsertionResult {
     common::Time time;
     std::vector<std::shared_ptr<const Submap>> insertion_submaps;
@@ -54,17 +55,16 @@ class LocalTrajectoryBuilder {
   LocalTrajectoryBuilder(const LocalTrajectoryBuilder&) = delete;
   LocalTrajectoryBuilder& operator=(const LocalTrajectoryBuilder&) = delete;
 
-  const mapping::GlobalTrajectoryBuilderInterface::PoseEstimate& pose_estimate()
-      const;
+  const PoseEstimate& pose_estimate() const;
   std::unique_ptr<InsertionResult> AddHorizontalRangeData(
       common::Time, const sensor::RangeData& range_data);
   void AddImuData(common::Time time, const Eigen::Vector3d& linear_acceleration,
                   const Eigen::Vector3d& angular_velocity);
   void AddOdometerData(common::Time time, const transform::Rigid3d& pose);
 
-  Submaps* submaps();
-
  private:
+  std::unique_ptr<InsertionResult> AddAccumulatedRangeData(
+      common::Time time, const sensor::RangeData& range_data);
   sensor::RangeData TransformAndFilterRangeData(
       const transform::Rigid3f& tracking_to_tracking_2d,
       const sensor::RangeData& range_data) const;
@@ -83,8 +83,9 @@ class LocalTrajectoryBuilder {
   void Predict(common::Time time);
 
   const proto::LocalTrajectoryBuilderOptions options_;
-  Submaps submaps_;
-  mapping::GlobalTrajectoryBuilderInterface::PoseEstimate last_pose_estimate_;
+  ActiveSubmaps active_submaps_;
+
+  PoseEstimate last_pose_estimate_;
 
   // Current 'pose_estimate_' and 'velocity_estimate_' at 'time_'.
   common::Time time_ = common::Time::min();
@@ -103,6 +104,10 @@ class LocalTrajectoryBuilder {
 
   std::unique_ptr<mapping::ImuTracker> imu_tracker_;
   mapping::OdometryStateTracker odometry_state_tracker_;
+
+  int num_accumulated_ = 0;
+  transform::Rigid3f first_pose_estimate_ = transform::Rigid3f::Identity();
+  sensor::RangeData accumulated_range_data_;
 };
 
 }  // namespace mapping_2d

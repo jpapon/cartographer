@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 The Cartographer Authors
+ * Copyright 2017 The Cartographer Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,20 +14,29 @@
  * limitations under the License.
  */
 
-#ifndef CARTOGRAPHER_MAPPING_3D_KALMAN_LOCAL_TRAJECTORY_BUILDER_OPTIONS_H_
-#define CARTOGRAPHER_MAPPING_3D_KALMAN_LOCAL_TRAJECTORY_BUILDER_OPTIONS_H_
+#ifndef CARTOGRAPHER_SENSOR_IMU_DATA_H_
+#define CARTOGRAPHER_SENSOR_IMU_DATA_H_
 
-#include "cartographer/common/lua_parameter_dictionary.h"
-#include "cartographer/mapping_3d/proto/kalman_local_trajectory_builder_options.pb.h"
+#include "Eigen/Core"
+#include "cartographer/common/time.h"
+#include "cartographer/sensor/proto/sensor.pb.h"
 
 namespace cartographer {
-namespace mapping_3d {
+namespace sensor {
 
-proto::KalmanLocalTrajectoryBuilderOptions
-CreateKalmanLocalTrajectoryBuilderOptions(
-    common::LuaParameterDictionary* parameter_dictionary);
+struct ImuData {
+  common::Time time;
+  Eigen::Vector3d linear_acceleration;
+  Eigen::Vector3d angular_velocity;
+};
 
-}  // namespace mapping_3d
+// Converts 'imu_data' to a proto::ImuData.
+proto::ImuData ToProto(const ImuData& imu_data);
+
+// Converts 'proto' to an ImuData.
+ImuData FromProto(const proto::ImuData& proto);
+
+}  // namespace sensor
 }  // namespace cartographer
 
-#endif  // CARTOGRAPHER_MAPPING_3D_KALMAN_LOCAL_TRAJECTORY_BUILDER_OPTIONS_H_
+#endif  // CARTOGRAPHER_SENSOR_IMU_DATA_H_

@@ -27,7 +27,7 @@ namespace mapping_2d {
 LocalTrajectoryBuilder::LocalTrajectoryBuilder(
     const proto::LocalTrajectoryBuilderOptions& options)
     : options_(options),
-      submaps_(options.submaps_options()),
+      active_submaps_(options.submaps_options()),
       motion_filter_(options_.motion_filter_options()),
       real_time_correlative_scan_matcher_(
           options_.real_time_correlative_scan_matcher_options()),
@@ -36,28 +36,11 @@ LocalTrajectoryBuilder::LocalTrajectoryBuilder(
 
 LocalTrajectoryBuilder::~LocalTrajectoryBuilder() {}
 
-Submaps* LocalTrajectoryBuilder::submaps() { return &submaps_; }
-
 sensor::RangeData LocalTrajectoryBuilder::TransformAndFilterRangeData(
     const transform::Rigid3f& tracking_to_tracking_2d,
     const sensor::RangeData& range_data) const {
-  // Drop any returns below the minimum range and convert returns beyond the
-  // maximum range into misses.
-  sensor::RangeData returns_and_misses{range_data.origin, {}, {}};
-  for (const Eigen::Vector3f& hit : range_data.returns) {
-    const float range = (hit - range_data.origin).norm();
-    if (range >= options_.min_range()) {
-      if (range <= options_.max_range()) {
-        returns_and_misses.returns.push_back(hit);
-      } else {
-        returns_and_misses.misses.push_back(
-            range_data.origin + options_.missing_data_ray_length() *
-                                    (hit - range_data.origin).normalized());
-      }
-    }
-  }
   const sensor::RangeData cropped = sensor::CropRangeData(
-      sensor::TransformRangeData(returns_and_misses, tracking_to_tracking_2d),
+      sensor::TransformRangeData(range_data, tracking_to_tracking_2d),
       options_.min_z(), options_.max_z());
   return sensor::RangeData{
       cropped.origin,
@@ -70,8 +53,8 @@ void LocalTrajectoryBuilder::ScanMatch(
     const transform::Rigid3d& tracking_to_tracking_2d,
     const sensor::RangeData& range_data_in_tracking_2d,
     transform::Rigid3d* pose_observation) {
-  const ProbabilityGrid& probability_grid =
-      submaps_.Get(submaps_.matching_index())->probability_grid();
+  std::shared_ptr<const Submap> matching_submap =
+      active_submaps_.submaps().front();
   transform::Rigid2d pose_prediction_2d =
       transform::Project2D(pose_prediction * tracking_to_tracking_2d.inverse());
   // The online correlative scan matcher will refine the initial estimate for
@@ -84,14 +67,15 @@ void LocalTrajectoryBuilder::ScanMatch(
   if (options_.use_online_correlative_scan_matching()) {
     real_time_correlative_scan_matcher_.Match(
         pose_prediction_2d, filtered_point_cloud_in_tracking_2d,
-        probability_grid, &initial_ceres_pose);
+        matching_submap->probability_grid(), &initial_ceres_pose);
   }
 
   transform::Rigid2d tracking_2d_to_map;
   ceres::Solver::Summary summary;
   ceres_scan_matcher_.Match(pose_prediction_2d, initial_ceres_pose,
                             filtered_point_cloud_in_tracking_2d,
-                            probability_grid, &tracking_2d_to_map, &summary);
+                            matching_submap->probability_grid(),
+                            &tracking_2d_to_map, &summary);
 
   *pose_observation =
       transform::Embed3D(tracking_2d_to_map) * tracking_to_tracking_2d;
@@ -113,6 +97,45 @@ LocalTrajectoryBuilder::AddHorizontalRangeData(
   }
 
   Predict(time);
+  if (num_accumulated_ == 0) {
+    first_pose_estimate_ = pose_estimate_.cast<float>();
+    accumulated_range_data_ =
+        sensor::RangeData{Eigen::Vector3f::Zero(), {}, {}};
+  }
+
+  const transform::Rigid3f tracking_delta =
+      first_pose_estimate_.inverse() * pose_estimate_.cast<float>();
+  const sensor::RangeData range_data_in_first_tracking =
+      sensor::TransformRangeData(range_data, tracking_delta);
+  // Drop any returns below the minimum range and convert returns beyond the
+  // maximum range into misses.
+  for (const Eigen::Vector3f& hit : range_data_in_first_tracking.returns) {
+    const Eigen::Vector3f delta = hit - range_data_in_first_tracking.origin;
+    const float range = delta.norm();
+    if (range >= options_.min_range()) {
+      if (range <= options_.max_range()) {
+        accumulated_range_data_.returns.push_back(hit);
+      } else {
+        accumulated_range_data_.misses.push_back(
+            range_data_in_first_tracking.origin +
+            options_.missing_data_ray_length() / range * delta);
+      }
+    }
+  }
+  ++num_accumulated_;
+
+  if (num_accumulated_ >= options_.scans_per_accumulation()) {
+    num_accumulated_ = 0;
+    return AddAccumulatedRangeData(
+        time, sensor::TransformRangeData(accumulated_range_data_,
+                                         tracking_delta.inverse()));
+  }
+  return nullptr;
+}
+
+std::unique_ptr<LocalTrajectoryBuilder::InsertionResult>
+LocalTrajectoryBuilder::AddAccumulatedRangeData(
+    const common::Time time, const sensor::RangeData& range_data) {
   const transform::Rigid3d odometry_prediction =
       pose_estimate_ * odometry_correction_;
   const transform::Rigid3d model_prediction = pose_estimate_;
@@ -151,6 +174,8 @@ LocalTrajectoryBuilder::AddHorizontalRangeData(
   if (last_scan_match_time_ > common::Time::min() &&
       time > last_scan_match_time_) {
     const double delta_t = common::ToSeconds(time - last_scan_match_time_);
+    // This adds the observed difference in velocity that would have reduced the
+    // error to zero.
     velocity_estimate_ += (pose_estimate_.translation().head<2>() -
                            model_prediction.translation().head<2>()) /
                           delta_t;
@@ -176,11 +201,13 @@ LocalTrajectoryBuilder::AddHorizontalRangeData(
     return nullptr;
   }
 
+  // Querying the active submaps must be done here before calling
+  // InsertRangeData() since the queried values are valid for next insertion.
   std::vector<std::shared_ptr<const Submap>> insertion_submaps;
-  for (int insertion_index : submaps_.insertion_indices()) {
-    insertion_submaps.push_back(submaps_.Get(insertion_index));
+  for (std::shared_ptr<Submap> submap : active_submaps_.submaps()) {
+    insertion_submaps.push_back(submap);
   }
-  submaps_.InsertRangeData(
+  active_submaps_.InsertRangeData(
       TransformRangeData(range_data_in_tracking_2d,
                          transform::Embed3D(pose_estimate_2d.cast<float>())));
 
@@ -189,7 +216,7 @@ LocalTrajectoryBuilder::AddHorizontalRangeData(
       range_data_in_tracking_2d, pose_estimate_2d});
 }
 
-const mapping::GlobalTrajectoryBuilderInterface::PoseEstimate&
+const LocalTrajectoryBuilder::PoseEstimate&
 LocalTrajectoryBuilder::pose_estimate() const {
   return last_pose_estimate_;
 }

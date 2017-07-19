@@ -22,6 +22,7 @@
 
 #include "Eigen/Core"
 #include "cartographer/common/lua_parameter_dictionary.h"
+#include "cartographer/mapping/proto/serialization.pb.h"
 #include "cartographer/mapping/proto/submap_visualization.pb.h"
 #include "cartographer/mapping/submaps.h"
 #include "cartographer/mapping/trajectory_node.h"
@@ -44,25 +45,28 @@ proto::SubmapsOptions CreateSubmapsOptions(
 class Submap : public mapping::Submap {
  public:
   Submap(const MapLimits& limits, const Eigen::Vector2f& origin);
+  explicit Submap(const mapping::proto::Submap2D& proto);
+
+  void ToProto(mapping::proto::Submap* proto) const override;
 
   const ProbabilityGrid& probability_grid() const { return probability_grid_; }
-  const bool finished() const { return finished_; }
+  bool finished() const { return finished_; }
 
   void ToResponseProto(
       const transform::Rigid3d& global_submap_pose,
       mapping::proto::SubmapQuery::Response* response) const override;
 
- private:
-  // TODO(hrapp): Remove friend declaration.
-  friend class Submaps;
+  // Insert 'range_data' into this submap using 'range_data_inserter'. The
+  // submap must not be finished yet.
+  void InsertRangeData(const sensor::RangeData& range_data,
+                       const RangeDataInserter& range_data_inserter);
+  void Finish();
 
+ private:
   ProbabilityGrid probability_grid_;
   bool finished_ = false;
 };
 
-// Submaps is a sequence of maps to which scans are matched and into which scans
-// are inserted.
-//
 // Except during initialization when only a single submap exists, there are
 // always two submaps into which scans are inserted: an old submap that is used
 // for matching, and a new one, which will be used for matching next, that is
@@ -70,34 +74,30 @@ class Submap : public mapping::Submap {
 //
 // Once a certain number of scans have been inserted, the new submap is
 // considered initialized: the old submap is no longer changed, the "new" submap
-// is now the "old" submap and is used for scan-to-map matching. Moreover,
-// a "new" submap gets inserted.
-class Submaps {
+// is now the "old" submap and is used for scan-to-map matching. Moreover, a
+// "new" submap gets created. The "old" submap is forgotten by this object.
+class ActiveSubmaps {
  public:
-  explicit Submaps(const proto::SubmapsOptions& options);
+  explicit ActiveSubmaps(const proto::SubmapsOptions& options);
 
-  Submaps(const Submaps&) = delete;
-  Submaps& operator=(const Submaps&) = delete;
-
-  std::shared_ptr<const Submap> Get(int index) const;
-  int size() const;
+  ActiveSubmaps(const ActiveSubmaps&) = delete;
+  ActiveSubmaps& operator=(const ActiveSubmaps&) = delete;
 
   // Returns the index of the newest initialized Submap which can be
   // used for scan-to-map matching.
   int matching_index() const;
 
-  // Returns the indices of the Submap into which point clouds will
-  // be inserted.
-  std::vector<int> insertion_indices() const;
-
   // Inserts 'range_data' into the Submap collection.
   void InsertRangeData(const sensor::RangeData& range_data);
 
+  std::vector<std::shared_ptr<Submap>> submaps() const;
+
  private:
-  void FinishSubmap(int index);
+  void FinishSubmap();
   void AddSubmap(const Eigen::Vector2f& origin);
 
   const proto::SubmapsOptions options_;
+  int matching_submap_index_ = 0;
   std::vector<std::shared_ptr<Submap>> submaps_;
   RangeDataInserter range_data_inserter_;
 };

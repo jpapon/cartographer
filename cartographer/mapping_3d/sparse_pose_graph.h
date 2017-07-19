@@ -77,14 +77,24 @@ class SparsePoseGraph : public mapping::SparsePoseGraph {
                   const Eigen::Vector3d& linear_acceleration,
                   const Eigen::Vector3d& angular_velocity);
 
+  void FreezeTrajectory(const int trajectory_id) override {
+    LOG(FATAL) << "Not yet implemented for 3D.";
+  }
+  void AddSubmapFromProto(const int trajectory_id,
+                          const transform::Rigid3d& initial_pose,
+                          const mapping::proto::Submap& submap) override {
+    LOG(FATAL) << "Not yet implemented for 3D";
+  }
   void AddTrimmer(std::unique_ptr<mapping::PoseGraphTrimmer> trimmer) override {
     LOG(FATAL) << "Not yet implemented for 3D.";
   }
   void RunFinalOptimization() override;
   std::vector<std::vector<int>> GetConnectedTrajectories() override;
   int num_submaps(int trajectory_id) EXCLUDES(mutex_) override;
-  transform::Rigid3d GetSubmapTransform(const mapping::SubmapId& submap_id)
-      EXCLUDES(mutex_) override;
+  mapping::SparsePoseGraph::SubmapData GetSubmapData(
+      const mapping::SubmapId& submap_id) EXCLUDES(mutex_) override;
+  std::vector<std::vector<mapping::SparsePoseGraph::SubmapData>>
+  GetAllSubmapData() EXCLUDES(mutex_) override;
   transform::Rigid3d GetLocalToGlobalTransform(int trajectory_id)
       EXCLUDES(mutex_) override;
   std::vector<std::vector<mapping::TrajectoryNode>> GetTrajectoryNodes()
@@ -150,6 +160,9 @@ class SparsePoseGraph : public mapping::SparsePoseGraph {
       const std::vector<std::vector<sparse_pose_graph::SubmapData>>&
           submap_transforms,
       int trajectory_id) const REQUIRES(mutex_);
+
+  mapping::SparsePoseGraph::SubmapData GetSubmapDataUnderLock(
+      const mapping::SubmapId& submap_id) REQUIRES(mutex_);
 
   const mapping::proto::SparsePoseGraphOptions options_;
   common::Mutex mutex_;

@@ -80,12 +80,18 @@ class SparsePoseGraph : public mapping::SparsePoseGraph {
                   const Eigen::Vector3d& linear_acceleration,
                   const Eigen::Vector3d& angular_velocity);
 
+  void FreezeTrajectory(int trajectory_id) override;
+  void AddSubmapFromProto(int trajectory_id,
+                          const transform::Rigid3d& initial_pose,
+                          const mapping::proto::Submap& submap) override;
   void AddTrimmer(std::unique_ptr<mapping::PoseGraphTrimmer> trimmer) override;
   void RunFinalOptimization() override;
   std::vector<std::vector<int>> GetConnectedTrajectories() override;
   int num_submaps(int trajectory_id) EXCLUDES(mutex_) override;
-  transform::Rigid3d GetSubmapTransform(const mapping::SubmapId& submap_id)
-      EXCLUDES(mutex_) override;
+  mapping::SparsePoseGraph::SubmapData GetSubmapData(
+      const mapping::SubmapId& submap_id) EXCLUDES(mutex_) override;
+  std::vector<std::vector<mapping::SparsePoseGraph::SubmapData>>
+  GetAllSubmapData() EXCLUDES(mutex_) override;
   transform::Rigid3d GetLocalToGlobalTransform(int trajectory_id)
       EXCLUDES(mutex_) override;
   std::vector<std::vector<mapping::TrajectoryNode>> GetTrajectoryNodes()
@@ -148,15 +154,19 @@ class SparsePoseGraph : public mapping::SparsePoseGraph {
   // Computes the local to global frame transform based on the given optimized
   // 'submap_transforms'.
   transform::Rigid3d ComputeLocalToGlobalTransform(
-      const std::vector<std::vector<sparse_pose_graph::SubmapData>>&
+      const std::vector<std::deque<sparse_pose_graph::SubmapData>>&
           submap_transforms,
-      int trajectory_id) const REQUIRES(mutex_);
+      const std::vector<int>& num_trimmed_submaps, int trajectory_id) const
+      REQUIRES(mutex_);
+
+  mapping::SparsePoseGraph::SubmapData GetSubmapDataUnderLock(
+      const mapping::SubmapId& submap_id) REQUIRES(mutex_);
 
   const mapping::proto::SparsePoseGraphOptions options_;
   common::Mutex mutex_;
 
   // If it exists, further scans must be added to this queue, and will be
-  // considered later.
+  // considered later
   std::unique_ptr<std::deque<std::function<void()>>> scan_queue_
       GUARDED_BY(mutex_);
 
@@ -194,12 +204,16 @@ class SparsePoseGraph : public mapping::SparsePoseGraph {
   int num_trajectory_nodes_ GUARDED_BY(mutex_) = 0;
 
   // Current submap transforms used for displaying data.
-  std::vector<std::vector<sparse_pose_graph::SubmapData>>
+  std::vector<int> num_trimmed_submaps_at_last_optimization_ GUARDED_BY(mutex_);
+  std::vector<std::deque<sparse_pose_graph::SubmapData>>
       optimized_submap_transforms_ GUARDED_BY(mutex_);
 
   // List of all trimmers to consult when optimizations finish.
   std::vector<std::unique_ptr<mapping::PoseGraphTrimmer>> trimmers_
       GUARDED_BY(mutex_);
+
+  // Set of all frozen trajectories not being optimized.
+  std::set<int> frozen_trajectories_ GUARDED_BY(mutex_);
 
   // Allows querying and manipulating the pose graph by the 'trimmers_'. The
   // 'mutex_' of the pose graph is held while this class is used.

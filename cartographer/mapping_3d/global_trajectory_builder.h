@@ -17,8 +17,6 @@
 #ifndef CARTOGRAPHER_MAPPING_3D_GLOBAL_TRAJECTORY_BUILDER_H_
 #define CARTOGRAPHER_MAPPING_3D_GLOBAL_TRAJECTORY_BUILDER_H_
 
-#include <memory>
-
 #include "cartographer/mapping/global_trajectory_builder_interface.h"
 #include "cartographer/mapping_3d/local_trajectory_builder.h"
 #include "cartographer/mapping_3d/proto/local_trajectory_builder_options.pb.h"
@@ -38,8 +36,6 @@ class GlobalTrajectoryBuilder
   GlobalTrajectoryBuilder(const GlobalTrajectoryBuilder&) = delete;
   GlobalTrajectoryBuilder& operator=(const GlobalTrajectoryBuilder&) = delete;
 
-  int num_submaps() override;
-  SubmapData GetSubmapData(int submap_index) override;
   void AddImuData(common::Time time, const Eigen::Vector3d& linear_acceleration,
                   const Eigen::Vector3d& angular_velocity) override;
   void AddRangefinderData(common::Time time, const Eigen::Vector3f& origin,
@@ -51,7 +47,7 @@ class GlobalTrajectoryBuilder
  private:
   const int trajectory_id_;
   mapping_3d::SparsePoseGraph* const sparse_pose_graph_;
-  std::unique_ptr<LocalTrajectoryBuilderInterface> local_trajectory_builder_;
+  LocalTrajectoryBuilder local_trajectory_builder_;
 };
 
 }  // namespace mapping_3d

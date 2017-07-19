@@ -26,8 +26,10 @@
 #include "cartographer/common/lua_parameter_dictionary.h"
 #include "cartographer/mapping/id.h"
 #include "cartographer/mapping/pose_graph_trimmer.h"
+#include "cartographer/mapping/proto/serialization.pb.h"
 #include "cartographer/mapping/proto/sparse_pose_graph.pb.h"
 #include "cartographer/mapping/proto/sparse_pose_graph_options.pb.h"
+#include "cartographer/mapping/submaps.h"
 #include "cartographer/mapping/trajectory_node.h"
 #include "cartographer/transform/rigid_transform.h"
 
@@ -61,11 +63,25 @@ class SparsePoseGraph {
     enum Tag { INTRA_SUBMAP, INTER_SUBMAP } tag;
   };
 
+  struct SubmapData {
+    std::shared_ptr<const Submap> submap;
+    transform::Rigid3d pose;
+  };
+
   SparsePoseGraph() {}
   virtual ~SparsePoseGraph() {}
 
   SparsePoseGraph(const SparsePoseGraph&) = delete;
   SparsePoseGraph& operator=(const SparsePoseGraph&) = delete;
+
+  // Freezes a trajectory. Poses in this trajectory will not be optimized.
+  virtual void FreezeTrajectory(int trajectory_id) = 0;
+
+  // Adds a 'submap' from a proto with the given 'initial_pose' to the frozen
+  // trajectory with 'trajectory_id'.
+  virtual void AddSubmapFromProto(int trajectory_id,
+                                  const transform::Rigid3d& initial_pose,
+                                  const proto::Submap& submap) = 0;
 
   // Adds a 'trimmer'. It will be used after all data added before it has been
   // included in the pose graph.
@@ -80,8 +96,12 @@ class SparsePoseGraph {
   // Return the number of submaps for the given 'trajectory_id'.
   virtual int num_submaps(int trajectory_id) = 0;
 
-  // Returns the current optimized transform for the given 'submap_id'.
-  virtual transform::Rigid3d GetSubmapTransform(const SubmapId& submap_id) = 0;
+  // Returns the current optimized transform and submap itself for the given
+  // 'submap_id'.
+  virtual SubmapData GetSubmapData(const SubmapId& submap_id) = 0;
+
+  // Returns data for all Submaps by trajectory.
+  virtual std::vector<std::vector<SubmapData>> GetAllSubmapData() = 0;
 
   // Returns the transform converting data in the local map frame (i.e. the
   // continuous, non-loop-closed frame) into the global map frame (i.e. the

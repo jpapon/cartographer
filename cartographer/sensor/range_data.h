@@ -35,12 +35,6 @@ struct RangeData {
   PointCloud misses;
 };
 
-// Converts 'range_data' to a proto::RangeData.
-proto::RangeData ToProto(const RangeData& range_data);
-
-// Converts 'proto' to a RangeData.
-RangeData FromProto(const proto::RangeData& proto);
-
 RangeData TransformRangeData(const RangeData& range_data,
                              const transform::Rigid3f& transform);
 
@@ -55,6 +49,9 @@ struct CompressedRangeData {
   CompressedPointCloud misses;
 };
 
+proto::CompressedRangeData ToProto(
+    const CompressedRangeData& compressed_range_data);
+CompressedRangeData FromProto(const proto::CompressedRangeData& proto);
 CompressedRangeData Compress(const RangeData& range_data);
 
 RangeData Decompress(const CompressedRangeData& compressed_range_Data);

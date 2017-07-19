@@ -51,16 +51,14 @@ class SparsePoseGraphTest : public ::testing::Test {
       auto parameter_dictionary = common::MakeDictionary(R"text(
           return {
             resolution = 0.05,
-            half_length = 21.,
             num_range_data = 1,
-            output_debug_images = false,
             range_data_inserter = {
               insert_free_space = true,
               hit_probability = 0.53,
               miss_probability = 0.495,
             },
           })text");
-      submaps_ = common::make_unique<Submaps>(
+      active_submaps_ = common::make_unique<ActiveSubmaps>(
           CreateSubmapsOptions(parameter_dictionary.get()));
     }
 
@@ -104,6 +102,16 @@ class SparsePoseGraphTest : public ::testing::Test {
                 linear_xy_search_window = 4.,
                 linear_z_search_window = 4.,
                 angular_search_window = 0.1,
+              },
+              high_resolution_adaptive_voxel_filter = {
+                max_length = 2.,
+                min_num_points = 150,
+                max_range = 15.,
+              },
+              low_resolution_adaptive_voxel_filter = {
+                max_length = 4.,
+                min_num_points = 200,
+                max_range = 60.,
               },
               ceres_scan_matcher_3d = {
                 occupied_space_weight_0 = 20.,
@@ -150,14 +158,14 @@ class SparsePoseGraphTest : public ::testing::Test {
         point_cloud_,
         transform::Embed3D(current_pose_.inverse().cast<float>()));
     std::vector<std::shared_ptr<const Submap>> insertion_submaps;
-    for (int insertion_index : submaps_->insertion_indices()) {
-      insertion_submaps.push_back(submaps_->Get(insertion_index));
+    for (auto submap : active_submaps_->submaps()) {
+      insertion_submaps.push_back(submap);
     }
     const sensor::RangeData range_data{
         Eigen::Vector3f::Zero(), new_point_cloud, {}};
     const transform::Rigid2d pose_estimate = noise * current_pose_;
     constexpr int kTrajectoryId = 0;
-    submaps_->InsertRangeData(TransformRangeData(
+    active_submaps_->InsertRangeData(TransformRangeData(
         range_data, transform::Embed3D(pose_estimate.cast<float>())));
 
     sparse_pose_graph_->AddScan(
@@ -170,7 +178,7 @@ class SparsePoseGraphTest : public ::testing::Test {
   }
 
   sensor::PointCloud point_cloud_;
-  std::unique_ptr<Submaps> submaps_;
+  std::unique_ptr<ActiveSubmaps> active_submaps_;
   common::ThreadPool thread_pool_;
   std::unique_ptr<SparsePoseGraph> sparse_pose_graph_;
   transform::Rigid2d current_pose_;

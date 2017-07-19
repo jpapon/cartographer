@@ -68,8 +68,8 @@ class ConstraintBuilder {
   ConstraintBuilder& operator=(const ConstraintBuilder&) = delete;
 
   // Schedules exploring a new constraint between 'submap' identified by
-  // 'submap_id', and the 'point_cloud' for 'node_id'. The 'intial_pose' is
-  // relative to the 'submap'.
+  // 'submap_id', and the 'compressed_point_cloud' for 'node_id'.
+  // The 'initial_pose' is relative to the 'submap'.
   //
   // The pointees of 'submap' and 'compressed_point_cloud' must stay valid until
   // all computations are finished.
@@ -110,7 +110,8 @@ class ConstraintBuilder {
 
  private:
   struct SubmapScanMatcher {
-    const HybridGrid* hybrid_grid;
+    const HybridGrid* high_resolution_hybrid_grid;
+    const HybridGrid* low_resolution_hybrid_grid;
     std::unique_ptr<scan_matching::FastCorrelativeScanMatcher>
         fast_correlative_scan_matcher;
   };
@@ -120,14 +121,13 @@ class ConstraintBuilder {
   void ScheduleSubmapScanMatcherConstructionAndQueueWorkItem(
       const mapping::SubmapId& submap_id,
       const std::vector<mapping::TrajectoryNode>& submap_nodes,
-      const HybridGrid* submap, std::function<void()> work_item)
-      REQUIRES(mutex_);
+      const Submap* submap, std::function<void()> work_item) REQUIRES(mutex_);
 
   // Constructs the scan matcher for a 'submap', then schedules its work items.
   void ConstructSubmapScanMatcher(
       const mapping::SubmapId& submap_id,
       const std::vector<mapping::TrajectoryNode>& submap_nodes,
-      const HybridGrid* submap) EXCLUDES(mutex_);
+      const Submap* submap) EXCLUDES(mutex_);
 
   // Returns the scan matcher for a submap, which has to exist.
   const SubmapScanMatcher* GetSubmapScanMatcher(
@@ -185,8 +185,9 @@ class ConstraintBuilder {
   const sensor::AdaptiveVoxelFilter adaptive_voxel_filter_;
   scan_matching::CeresScanMatcher ceres_scan_matcher_;
 
-  // Histogram of scan matcher scores.
+  // Histograms of scan matcher scores.
   common::Histogram score_histogram_ GUARDED_BY(mutex_);
+  common::Histogram rotational_score_histogram_ GUARDED_BY(mutex_);
 };
 
 }  // namespace sparse_pose_graph

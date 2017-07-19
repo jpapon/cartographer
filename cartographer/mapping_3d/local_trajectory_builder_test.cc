@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "cartographer/mapping_3d/kalman_local_trajectory_builder.h"
+#include "cartographer/mapping_3d/local_trajectory_builder.h"
 
 #include <memory>
 #include <random>
@@ -35,7 +35,7 @@ namespace cartographer {
 namespace mapping_3d {
 namespace {
 
-class KalmanLocalTrajectoryBuilderTest : public ::testing::Test {
+class LocalTrajectoryBuilderTest : public ::testing::Test {
  protected:
   struct TrajectoryNode {
     common::Time time;
@@ -64,6 +64,14 @@ class KalmanLocalTrajectoryBuilderTest : public ::testing::Test {
             max_range = 50.,
           },
 
+          use_online_correlative_scan_matching = false,
+          real_time_correlative_scan_matcher = {
+            linear_search_window = 0.2,
+            angular_search_window = math.rad(1.),
+            translation_delta_cost_weight = 1e-1,
+            rotation_delta_cost_weight = 1.,
+          },
+
           ceres_scan_matcher = {
             occupied_space_weight_0 = 5.,
             occupied_space_weight_1 = 20.,
@@ -76,11 +84,16 @@ class KalmanLocalTrajectoryBuilderTest : public ::testing::Test {
               num_threads = 1,
             },
           },
+
           motion_filter = {
             max_time_seconds = 0.2,
             max_distance_meters = 0.02,
             max_angle_radians = 0.001,
           },
+
+          imu_gravity_time_constant = 1.,
+          num_odometry_states = 1,
+
           submaps = {
             high_resolution = 0.2,
             high_resolution_max_range = 50.,
@@ -91,38 +104,6 @@ class KalmanLocalTrajectoryBuilderTest : public ::testing::Test {
               miss_probability = 0.4,
               num_free_space_voxels = 0,
             },
-          },
-
-          use = "KALMAN",
-          kalman_local_trajectory_builder =  {
-            use_online_correlative_scan_matching = false,
-            real_time_correlative_scan_matcher = {
-              linear_search_window = 0.2,
-              angular_search_window = math.rad(1.),
-              translation_delta_cost_weight = 1e-1,
-              rotation_delta_cost_weight = 1.,
-            },
-            pose_tracker = {
-              orientation_model_variance = 5e-4,
-              position_model_variance = 0.000654766,
-              velocity_model_variance = 0.053926,
-              imu_gravity_time_constant = 1.,
-              imu_gravity_variance = 1e-4,
-              num_odometry_states = 1,
-            },
-
-            scan_matcher_variance = 1e-6,
-            odometer_translational_variance = 1e-7,
-            odometer_rotational_variance = 1e-7,
-          },
-          optimizing_local_trajectory_builder = {
-            high_resolution_grid_weight = 5.,
-            low_resolution_grid_weight = 15.,
-            velocity_weight = 4e1,
-            translation_weight = 1e2,
-            rotation_weight = 1e3,
-            odometry_translation_weight = 1e4,
-            odometry_rotation_weight = 1e4,
           },
         }
         )text");
@@ -269,14 +250,13 @@ class KalmanLocalTrajectoryBuilderTest : public ::testing::Test {
     }
   }
 
-  std::unique_ptr<KalmanLocalTrajectoryBuilder> local_trajectory_builder_;
+  std::unique_ptr<LocalTrajectoryBuilder> local_trajectory_builder_;
   std::vector<Eigen::Vector3f> bubbles_;
 };
 
-TEST_F(KalmanLocalTrajectoryBuilderTest,
-       MoveInsideCubeUsingOnlyCeresScanMatcher) {
+TEST_F(LocalTrajectoryBuilderTest, MoveInsideCubeUsingOnlyCeresScanMatcher) {
   local_trajectory_builder_.reset(
-      new KalmanLocalTrajectoryBuilder(CreateTrajectoryBuilderOptions()));
+      new LocalTrajectoryBuilder(CreateTrajectoryBuilderOptions()));
   VerifyAccuracy(GenerateCorkscrewTrajectory(), 1e-1);
 }
 
